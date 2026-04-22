@@ -66,6 +66,8 @@ interface EmailComposerProps {
     fromEmail?: string;
     fromName?: string;
     identityId?: string;
+    inReplyTo?: string; //add for downstream clients to use for conversation threading
+    references?: string[]; //add for downstream clients to use for conversation threading
     attachments?: Array<{ blobId: string; name: string; type: string; size: number; disposition?: 'attachment' | 'inline'; cid?: string }>;
   }) => void | Promise<void>;
   onClose?: () => void;
@@ -86,6 +88,9 @@ interface EmailComposerProps {
     htmlBody?: string;
     receivedAt?: string;
     accountId?: string;
+     messageId?: string; //add for downstream clients to use for conversation threading
+     inReplyTo?: string; //add for downstream clients to use for conversation threading
+    references?: string[]; //add for downstream clients to use for conversation threading
     attachments?: Array<{ blobId: string; name?: string; type: string; size: number; cid?: string; disposition?: string }>;
   };
 }
@@ -805,6 +810,28 @@ export function EmailComposer({
     return undefined;
   };
 
+  //to add inReplyTo, messageId, and references for downstream thrading 
+  //that other clients may use
+  const buildReplyThreadHeaders = (): { inReplyTo?: string; references?: string[] } => {
+    if (mode !== 'reply' && mode !== 'replyAll') {
+      return {};
+    }
+
+    const parentMessageId = replyTo?.messageId;
+    if (!parentMessageId) {
+      return {};
+    }
+
+    const references = [
+      ...(replyTo?.references ?? []),
+      parentMessageId,
+    ].filter((value, index, array): value is string => !!value && array.indexOf(value) === index);
+
+    return {
+      inReplyTo: parentMessageId,
+      references,
+    };
+  };
   // Rewrite data: URLs of dropped images (tagged with data-cid) into cid:
   // references so recipient clients that strip data URIs can still render them.
   const rewriteInlineImages = (html: string): {
@@ -915,7 +942,8 @@ export function EmailComposer({
       ? undefined
       : `<div>${rewritten!.html}</div>${buildSignatureHtml()}`;
     const inlineAttachments = rewritten?.attachments ?? [];
-
+    const threadHeaders = buildReplyThreadHeaders(); //prepare the headers to add to the reply
+    
     try {
       // S/MIME send pipeline: build raw MIME → sign → encrypt → sendRawEmail
       if ((smimeSign_ || smimeEncrypt_) && client && currentIdentity?.id) {
@@ -974,6 +1002,9 @@ export function EmailComposer({
           cc: ccAddresses.length > 0 ? ccAddresses.map(e => ({ email: e })) : undefined,
           bcc: bccAddresses.length > 0 ? bccAddresses.map(e => ({ email: e })) : undefined,
           subject,
+          inReplyTo: threadHeaders.inReplyTo, // for downstream alternate client threading
+          references: threadHeaders.references, // for downstream alternate client threading
+  
           textBody: finalBody,
           htmlBody: finalHtmlBody,
           attachments: mimeAttachments.length > 0 ? mimeAttachments : undefined,
@@ -986,6 +1017,8 @@ export function EmailComposer({
           to: toAddresses.map(e => ({ email: e })),
           cc: ccAddresses.length > 0 ? ccAddresses.map(e => ({ email: e })) : undefined,
           subject,
+             inReplyTo: threadHeaders.inReplyTo, // for downstream alternate client threading
+          references: threadHeaders.references, // for downstream alternate client threading
         };
 
         // 5. Sign if enabled
@@ -1041,6 +1074,8 @@ export function EmailComposer({
           fromEmail,
           fromName: currentIdentity?.name || undefined,
           identityId: currentIdentity?.id,
+           inReplyTo: threadHeaders.inReplyTo, // for downstream clients to use in their conversation threading
+          references: threadHeaders.references, // for downstream clients to use in their conversation threading
           attachments: uploadedAttachments.length > 0 ? uploadedAttachments : undefined,
         });
       }
